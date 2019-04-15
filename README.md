@@ -6,6 +6,8 @@
 
 ## Overview
 
+> **These scripts are very messy, well the below the quality I try to maintain when releasing source files.**  They've been thrown together for my particular problem, and I thought others might find something useful.  Beyond that, it doesn't seem worth the effort to clean and potentially re-write large portions.
+
 ### Background
 
 I recently had the problem of wanting to preserve an old internet message board on an aging web server, but I didn't want a static archive.  My goal was to migrate the forum to a new system, maintaining all existing data but supporting new posts and modern search features — a "living archive".
@@ -21,7 +23,6 @@ Before discussing more, I want to detail the limitations right up front.
 - My sample scripts were written for Invision's *IP.Board* forum software, circa 2005.  Forums powered by any other platform will very likely require changing the parsing scripts `html_to_files.py` and `files_to_fields.py`.  I expect the `Mongo`[^1] class in `Mongo.py` will work in any case because it deals more with NodeBB's schema.  It may take some experimenting with your HTML source, but as long as you can parse out *user*, *post*, and *topic* info, you should be ok.
 - Images are not preserved.  It would be possible to add this feature, but I was working with a forum that blocked almost everything except text, so it was not a priority to me.
 - Any non-public information is lost.  Private messages, user profile settings, and a myriad of other things cannot be accessed.
-- These scripts are *very* messy, well the below the quality I try to maintain when releasing source files.  They've been thrown together for my particular problem, and I thought others might something useful.  Beyond that, it doesn't seem worth the effort to clean and potentially re-write large portions.
 
 Basically, these scripts may be able to help you save part of an existing forum, but they will require modification for specific tasks and a lot of data will still be lost without the original database.
 
@@ -94,6 +95,8 @@ Before running, you'll need to copy over the seed URLs and forum numbers you use
 > If subforums are not processed together, user names, posts, and topic IDs all carry a risk of conflicting when attempting to merge the data into a single NodeBB instance.
 
 Next, add the new category numbers you got from **Step 2**.  *You may need to change logic here*.  Starting on line 90, there's a single if-else statement to assign the destination category ID based on the old forum number.  It will need to be extended with additional cases to support more than one or two forums at a time.
+
+*The reply-to handling starting with snapback detection at line 269 will also need changing for different forum URLs.*
 
 With all these changes in place, run `python files_to_fields.py`.  It could take some time, and it will likely need a lot of memory for large amounts of data.  Upon completion, the data will be compressed down into "output.pkl".
 
@@ -208,6 +211,8 @@ After a restart, NodeBB should allow the user to login to the "\_bot" account wi
 I'm hoping these scripts and the provided instructions are useful.  I know this document is long, and unfortunately, a lot of editing may be needed for any variation of the task.  Given more time or interest, it might be worth cleaning up the code to function like ready-made tools, but I'm not sure how to even begin handling all the different types of forum software.
 
 For now, I wanted to get this code out there, even if it's still a little unfinished.  In the absence of anything available to automatically generate NodeBB databases from existing data, it's at least something!
+
+---
 
 [^1]: The `Mongo` class is a bit of a misnomer.  It really should be something like `NodeBB` because it manages the NodeBB schema.  I called it Mongo because it is organized into documents for insertion into a Mongo database, and at first, I planned to do the insertion directly in that class.  That was split out as more processing steps were introduced.
 
