@@ -4,9 +4,9 @@
 
 > **Note: These scripts extract data from HTML web forums, not an existing database**
 
-## Overview
-
 > **These scripts are very messy, well the below the quality I try to maintain when releasing source files.**  They've been thrown together for my particular problem, and I thought others might find something useful.  Beyond that, it doesn't seem worth the effort to clean and potentially re-write large portions.
+
+## Overview
 
 ### Background
 
