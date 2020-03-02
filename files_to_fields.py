@@ -80,17 +80,22 @@ forum_stats = []
 # forums = {}
 # forums[17] = 'http://www.ambrosiasw.com/forums/index.php?showtopic=6062'
 
+## Category mapping
+cat_map = {
+17  : 7, # >  |---- Cythera web board
+64  : 6  # >  |---- Cythera Chronicles
+}
+
 link_tracker = open('links.txt','w')
 topic_stack = [] # keep topics in stack to add in correct order (reading from latest but then visit last)
 
 for forum in forums:
+	print("Forum #: " + str(forum))
 	forum_tids = 0
 	forum_pids = 0
 	url_stack.append(forums[forum]) # seed url
-	if forum == 64:
-		category = 7
-	else:
-		category = 6
+	# change destination category based on mapping from old to new
+	category = cat_map[forum]
 
 	# while links to visit
 	while len(url_stack) > 0:
@@ -105,6 +110,8 @@ for forum in forums:
 			if 'showforum' in args:
 				page = int(int(args['st'][0]) / 30) # page number is divisble by 30 for forum topic lists (default shows 30 topics per page)
 				soup = BeautifulSoup(open("data/f" + str(forum) + "_p" + str(page) + ".html"), 'html.parser')
+				if not soup.body:
+					soup = BeautifulSoup(open("data/f" + str(forum) + "_p" + str(page) + ".html"), 'lxml') # try with different parser
 			elif 'showtopic' in args:
 				topicnum = int(args['showtopic'][0])
 				if 'st' in args:
@@ -112,6 +119,8 @@ for forum in forums:
 				else:
 					page = 0
 				soup = BeautifulSoup(open("data/f" + str(forum) + "_t" + str(topicnum) +  "_p" + str(page) + ".html"), 'html.parser')
+				if not soup.body:
+					soup = BeautifulSoup(open("data/f" + str(forum) + "_t" + str(topicnum) +  "_p" + str(page) + ".html"), 'lxml') # try with different parser
 			else:
 				page = -1
 				print("Failed to load url: " + next_url)
@@ -198,126 +207,135 @@ for forum in forums:
 					# remove debug and ending info
 					poll_text_short = poll_text_raw[0:poll_text_raw.find('Debug.dir( ipb.topic.poll )')]
 					poll_text = re.sub(r'\n+','\n',re.sub(r'\t+','\t',poll_text_short))
-				for post in all_posts.findAll('div',attrs={'class':'post_block'}): # works for almost all topics and posts, a few with html issues can't be fully parsed by bs4
-					# author name
-					guest = post.find('h3',attrs={'class':'guest'})
-					if guest:
-						post_author = re.sub(r"#[0-9]*","",guest.text.strip()).strip() # guest.text gets guest name and post id, so use regex to remove id
-					else:
-						post_author = post.find('span',attrs={'class':'author'}).text.strip()
-					# join date
-					author_joined = 0 # start with 0, will set later
-					for el in post.find('ul',attrs={'class':'user_fields'}).children:
-						try:
-							if el.find('span',attrs={'class':'ft'}).text.strip() == 'Joined:':
-								author_joined_str = el.find('span',attrs={'class':'fc'}).text.strip()
-								author_joined_date = datetime.strptime(author_joined_str,'%d-%B %y')
-								author_joined = time.mktime(author_joined_date.timetuple()) # set here if available
-						except:
-							pass # ignore non-join date entries
-
-					# post date
-					post_date_str = post.find('abbr',attrs={'class':'published'}).text.strip()
-					post_date_date = datetime.strptime(post_date_str,'%d %B %Y - %I:%M %p')
-					post_date = time.mktime(post_date_date.timetuple())
-
-					# post num and id (num in topic, id is global)
-					post_info = post.find('a',attrs={'rel':'bookmark'})
-					postnum = int(post_info.text.strip().replace('#',''))
-					post_link = post_info['href']
-					post_parsed = urlparse.urlparse(post_link)
-					post_args = urlparse.parse_qs(post_parsed.query)
-					if 'p' in post_args:
-						post_id = int(post_args['p'][0])
-
-					# post content
-					post_content = post.find('div',attrs={'class':'entry-content'})
-					# in content, determine if reply and which post replying to and make sure syntax for quote/reply correct in body
-					post_replyto = -1 # default not reply
-					snapback = post_content.find('a',attrs={'rel':'citation'})
-					if snapback:
-						snapback_link = snapback['href']
-						snapback_parsed = urlparse.urlparse(snapback_link)
-						snapback_args = urlparse.parse_qs(snapback_parsed.query)
-						if 'pid' in snapback_args:
-							temp_post_replyto = int(snapback_args['pid'][0])
-							try: # can only set reply link if same topic for nodebb
-								reply_tid = mon.m_posts[temp_post_replyto]['tid']
-								if reply_tid == mon.m_topics[topic_id]['tid']:
-									post_replyto = temp_post_replyto # set replyto post id if available
-							except:
-								pass
-							
-					# translate from html to markdown (bb code was already translated to html for website, which this pulls from)
-					post_content_text = str(post_content)
-					post_content_text = post_content_text.replace('[','(').replace(']',')') # first, remove square brackets
-					post_md = md_handler.handle(post_content_text)
-
-					# adjust post contents with other info
-					if postnum == 1: # first post
-						# add topic if missed for some reason (really only useful in testing since won't do anything in general usage, unless a bug)
-						mon.manage_topic(topic_id,category,post_author,post_date*1000,posts_parent,0,'',0,'',post_date*1000,post_author)
-						# add poll information on top, if available
-						if poll:
-							post_md = poll_text + '\n\n' + post_md
-						# add topic description at very topic, if available (will be empty string if not)
-						topic_desc = mon.temp_topics[topic_id]['description']
-						if len(topic_desc) > 0:
-							post_md = "**" + topic_desc + "**\n\n" + post_md
-
-					# replyto link points to first found reply (if in same topic), but must update any citation links in text to appropriate post
-					snapback = post_content.findAll('a',attrs={'rel':'citation'})
-					if snapback:
-						original_posts = []
-						for citation in snapback:
-							citation_link = citation['href']
-							citation_parsed = urlparse.urlparse(citation_link)
-							citation_args = urlparse.parse_qs(citation_parsed.query)
-							if 'pid' in citation_args:
-								original_posts.append(int(citation_args['pid'][0])) # keep list of originals if necessary
-						lookfor = '[![View Post](http://www.ambrosiasw.com/forums/public/style_images/ipb23/snapback.png)'
-						while post_md.find(lookfor) >= 0 and len(original_posts) > 0:
-							temp_md = post_md[post_md.find(lookfor):len(post_md)] # substring from current quote to end
-							old_user_stoppoint = temp_md.find(',')
-							to_replace = post_md[post_md.find(lookfor):post_md.find(lookfor)+old_user_stoppoint]
-							# attempt to replace, should work if the post is on cythera boards
+				# for post in all_posts.findAll('div',attrs={'class':'post_block'}): # works for almost all topics and posts, a few with html issues can't be fully parsed by bs4
+				for post in soup.findAll('div',attrs={'class':'post_block'}): # already checked if posts (from if all_post), so just grab all post blocks, may lose a few lines here or there from broken html
+					try:
+						# author name
+						guest = post.find('h3',attrs={'class':'guest'})
+						if guest:
+							post_author = re.sub(r"#[0-9]*","",guest.text.strip()).strip() # guest.text gets guest name and post id, so use regex to remove id
+						else:
+							post_author = post.find('span',attrs={'class':'author'}).text.strip()
+						# join date
+						author_joined = 0 # start with 0, will set later
+						for el in post.find('ul',attrs={'class':'user_fields'}).children:
 							try:
-								old_id = original_posts.pop(0)
-								new_id = mon.m_posts[old_id]['pid']
-								new_user_id = mon.m_posts[old_id]['uid']
-								new_topic_id = mon.m_posts[old_id]['tid']
-								for k,v in mon.m_users.items():
-									if v['uid'] == new_user_id:
-										new_username = v['userslug']
-										break
-								for k,v in mon.m_topics.items():
-									if v['tid'] == new_topic_id:
-										new_topicname = v['title']
-										break
-								post_md = post_md.replace(to_replace,'@'+new_username,1)
-								post_md = post_md.replace('said:\n\n','said in ['+new_topicname+'](/post/'+str(new_id)+'):\n> ',1)
+								if el.find('span',attrs={'class':'ft'}).text.strip() == 'Joined:':
+									author_joined_str = el.find('span',attrs={'class':'fc'}).text.strip()
+									author_joined_date = datetime.strptime(author_joined_str,'%d-%B %y')
+									author_joined = time.mktime(author_joined_date.timetuple()) # set here if available
+									break
 							except:
-								pass # no need to replace if not easy to do
+								pass # ignore non-join date entries
 
-					all_links = re.findall(r"((?:__|[*#])|!?\[(.*?)\]\(.*?\))",post_md)
-					for l in all_links:
-						split_l = l[0].split('/')
-						last_l = split_l[len(split_l)-1]
-						last_l = last_l.replace(')','')
-						if last_l in emoticon: # handle known ones
-							post_md = post_md.replace(l[0],emoticon[last_l])
-						elif '*' == l[0] or '#' == l[0] or '__' == l[0]: # ignore unexpected matches
-							pass
-						else: # save anything unknown to link tracker
-							link_tracker.write(l[0])
-							link_tracker.write('\n')
+						# post date
+						post_date_str = post.find('abbr',attrs={'class':'published'}).text.strip()
+						try:
+							post_date_date = datetime.strptime(post_date_str,'%d %B %Y - %I:%M %p')
+							post_date = time.mktime(post_date_date.timetuple())
+						except:
+							pass # just use the last valid post date if none can be extracted from this post (can happen due to errors in the original forum)
 
-					# add to fields list in mongo handler
-					mon.manage_user(post_author,author_joined*1000,post_date*1000)
-					mon.manage_post(post_id,topic_id,post_author,post_date*1000,post_md,post_replyto,postnum,post_link)
+						# post num and id (num in topic, id is global)
+						post_info = post.find('a',attrs={'rel':'bookmark'})
+						postnum = int(post_info.text.strip().replace('#',''))
+						post_link = post_info['href']
+						post_parsed = urlparse.urlparse(post_link)
+						post_args = urlparse.parse_qs(post_parsed.query)
+						if 'p' in post_args:
+							post_id = int(post_args['p'][0])
 
-					posts_counted += 1
-					forum_pids += 1
+						# post content
+						post_content = post.find('div',attrs={'class':'entry-content'})
+						# in content, determine if reply and which post replying to and make sure syntax for quote/reply correct in body
+						post_replyto = -1 # default not reply
+						snapback = post_content.find('a',attrs={'rel':'citation'})
+						if snapback:
+							snapback_link = snapback['href']
+							snapback_parsed = urlparse.urlparse(snapback_link)
+							snapback_args = urlparse.parse_qs(snapback_parsed.query)
+							if 'pid' in snapback_args:
+								temp_post_replyto = int(snapback_args['pid'][0])
+								try: # can only set reply link if same topic for nodebb
+									reply_tid = mon.m_posts[temp_post_replyto]['tid']
+									if reply_tid == mon.m_topics[topic_id]['tid']:
+										post_replyto = temp_post_replyto # set replyto post id if available
+								except:
+									pass
+								
+						# translate from html to markdown (bb code was already translated to html for website, which this pulls from)
+						post_content_text = str(post_content)
+						post_content_text = post_content_text.replace('[','(').replace(']',')') # first, remove square brackets
+						post_md = md_handler.handle(post_content_text)
+
+						# adjust post contents with other info
+						if postnum == 1: # first post
+							# add topic if missed for some reason (really only useful in testing since won't do anything in general usage, unless a bug)
+							mon.manage_topic(topic_id,category,post_author,post_date*1000,posts_parent,0,'',0,'',post_date*1000,post_author)
+							# add poll information on top, if available
+							if poll:
+								post_md = poll_text + '\n\n' + post_md
+							# add topic description at very topic, if available (will be empty string if not)
+							topic_desc = mon.temp_topics[topic_id]['description']
+							if len(topic_desc) > 0:
+								post_md = "**" + topic_desc + "**\n\n" + post_md
+
+						# replyto link points to first found reply (if in same topic), but must update any citation links in text to appropriate post
+						snapback = post_content.findAll('a',attrs={'rel':'citation'})
+						if snapback:
+							original_posts = []
+							for citation in snapback:
+								citation_link = citation['href']
+								citation_parsed = urlparse.urlparse(citation_link)
+								citation_args = urlparse.parse_qs(citation_parsed.query)
+								if 'pid' in citation_args:
+									original_posts.append(int(citation_args['pid'][0])) # keep list of originals if necessary
+							lookfor = '[![View Post](http://www.ambrosiasw.com/forums/public/style_images/ipb23/snapback.png)'
+							while post_md.find(lookfor) >= 0 and len(original_posts) > 0:
+								temp_md = post_md[post_md.find(lookfor):len(post_md)] # substring from current quote to end
+								old_user_stoppoint = temp_md.find(',')
+								to_replace = post_md[post_md.find(lookfor):post_md.find(lookfor)+old_user_stoppoint]
+								# attempt to replace, should work if the post is on cythera boards
+								try:
+									old_id = original_posts.pop(0)
+									new_id = mon.m_posts[old_id]['pid']
+									new_user_id = mon.m_posts[old_id]['uid']
+									new_topic_id = mon.m_posts[old_id]['tid']
+									for k,v in mon.m_users.items():
+										if v['uid'] == new_user_id:
+											new_username = v['userslug']
+											break
+									for k,v in mon.m_topics.items():
+										if v['tid'] == new_topic_id:
+											new_topicname = v['title']
+											break
+									post_md = post_md.replace(to_replace,'@'+new_username,1)
+									post_md = post_md.replace('said:\n\n','said in ['+new_topicname+'](/post/'+str(new_id)+'):\n> ',1)
+								except:
+									pass # no need to replace if not easy to do
+
+						all_links = re.findall(r"((?:__|[*#])|!?\[(.*?)\]\(.*?\))",post_md)
+						for l in all_links:
+							split_l = l[0].split('/')
+							last_l = split_l[len(split_l)-1]
+							last_l = last_l.replace(')','')
+							if last_l in emoticon: # handle known ones
+								post_md = post_md.replace(l[0],emoticon[last_l])
+							elif '*' == l[0] or '#' == l[0] or '__' == l[0]: # ignore unexpected matches
+								pass
+							else: # save anything unknown to link tracker
+								link_tracker.write(l[0])
+								link_tracker.write('\n')
+
+						# add to fields list in mongo handler
+						mon.manage_user(post_author,author_joined*1000,post_date*1000)
+						mon.manage_post(post_id,topic_id,post_author,post_date*1000,post_md,post_replyto,postnum,post_link)
+
+						posts_counted += 1
+						forum_pids += 1
+
+					except:
+						print("Skipping post " + str(posts_counted) + " in topic " + str(topicnum) + " forum " + str(forum))
 
 			# if forum page or topic, add next link if available to process next
 			next_link = soup.body.find('a',attrs={'title':'Next page','rel':'next'})

@@ -30,10 +30,10 @@ for k in mon.m_posts:
 	for link in all_links:
 		link_split = link[0].split(']')
 		for ls in link_split:
-			if ls[0] == '(': # find start of hyperlink
-				hyperlink = ls[1:ls.find(')')]
-				# handle hyperlinks in a simplistic way: if findpost, try to make post link; if showtopic, try to make topic link
-				try:
+			try:
+				if ls[0] == '(': # find start of hyperlink
+					hyperlink = ls[1:ls.find(')')]
+					# handle hyperlinks in a simplistic way: if findpost, try to make post link; if showtopic, try to make topic link
 					if 'findpost' in hyperlink: # look here first, then fall back on topic
 						ids = hyperlink.split('=') # doing this way because there's so many variations, only findpost is shared
 						pid = int(ids[-1].replace(')',''))
@@ -44,8 +44,8 @@ for k in mon.m_posts:
 						tid = int(ids[-1].replace(')',''))
 						new_pid = mon.m_topics[tid]['mainPid']
 						content = content.replace(hyperlink,'/post/'+str(new_pid))
-				except:
-					pass # don't replace if not easy to do
+			except:
+				pass # don't replace if not easy to do
 
 	# go through links for verification
 	all_links = re.findall(r"((?:__|[*#])|!?\[(.*?)\]\(.*?\))",content)

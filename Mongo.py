@@ -7,9 +7,12 @@ class Mongo:
 		self.m_users = {}
 		self.m_users_ord = []
 		self.m_users_supp = []
+		self.m_users_supp_indices = {} # reduce iterations by tracking specific indices we'll revisit
 		self.m_topics = {}
 		self.m_topics_ord = []
 		self.m_topics_supp = []
+		self.m_topics_supp_indices = {}
+		self.m_topics_supp_posters = {}
 		self.m_posts = {}
 		self.m_posts_ord = []
 		self.m_posts_supp = []
@@ -44,8 +47,8 @@ class Mongo:
 				"topiccount" : 0, # will update in topics as added
 				"uid" : self.uid,
 				"uploadedpicture" : "",
-				"username" : username + "_bot", # username has _bot appended by default to differentiate imported users; it can be removed here
-				"userslug" : userslug_fixed.lower() + "_bot",
+				"username" : username, # can include username adjustment like + '_bot' here
+				"userslug" : userslug_fixed.lower(),
 				"website" : "",
 				"password" : "",
 				"passwordExpiry" : 0
@@ -53,24 +56,26 @@ class Mongo:
 			self.m_users[username] = new_user
 			self.m_users_ord.append(username)
 
-			self.m_users_supp.append({"_key":"username:uid","value":username + "_bot","score":self.uid})
-			self.m_users_supp.append({"_key":"userslug:uid","value":userslug_fixed.lower() + "_bot","score":self.uid})
-			self.m_users_supp.append({"_key":"username:sorted","value":userslug_fixed.lower() + "_bot:" + str(self.uid),"score":0})
+			self.m_users_supp.append({"_key":"username:uid","value":username,"score":self.uid})
+			self.m_users_supp.append({"_key":"userslug:uid","value":userslug_fixed.lower(),"score":self.uid})
+			self.m_users_supp.append({"_key":"username:sorted","value":userslug_fixed.lower() + ":" + str(self.uid),"score":0})
 			self.m_users_supp.append({"_key":"group:registered-users:members","value":str(self.uid),"score":joindate})
-			self.m_users_supp.append({"_key":"user:"+str(self.uid)+":usernames","value":username + "_bot","score":joindate})
+			self.m_users_supp.append({"_key":"user:"+str(self.uid)+":usernames","value":username,"score":joindate})
 			self.m_users_supp.append({"_key":"users:reputation","value":str(self.uid),"score":0})
+			
 			# ones to update
 			self.m_users_supp.append({"_key":"users:joindate","value":str(self.uid),"score":joindate})
 			self.m_users_supp.append({"_key":"users:postcount","value":str(self.uid),"score":0})
+			# save indices in list to easily locate if needed
+			temp_len = len(self.m_users_supp)
+			self.m_users_supp_indices[self.uid] = [temp_len - 2, temp_len - 1] # 0: joindate, 1: postcount
 
 			self.uid += 1
 		else: # existing user
-			temp_uid = self.m_users[username]['uid'] # uid of existing user
 			if self.m_users[username]['joindate'] > joindate: # update joindate if earlier one found
 				self.m_users[username]['joindate'] = joindate
-				for i in range(0,len(self.m_users_supp)): # in supplemental list as well
-					if self.m_users_supp[i]['value'] == str(temp_uid) and self.m_users_supp[i]['_key'] == "users:joindate":
-						self.m_users_supp[i]['score'] = joindate
+				temp_uid = self.m_users[username]['uid'] # uid of existing user
+				self.m_users_supp[self.m_users_supp_indices[temp_uid][0]]['score'] = joindate
 			if self.m_users[username]['lastposttime'] < postdate: # update postdate if later one found
 				self.m_users[username]['lastposttime'] = postdate
 				self.m_users[username]['lastonline'] = postdate
@@ -124,6 +129,10 @@ class Mongo:
 			self.m_topics_supp.append({"_key":"cid:"+str(cid)+":tids:posts","value":str(self.tid),"score":0})
 			self.m_topics_supp.append({"_key":"topics:recent","value":str(self.tid),"score":timestamp})
 			self.m_topics_supp.append({"_key":"topics:posts","value":str(self.tid),"score":0})
+			# save indices to quickly locate as needed
+			temp_len = len(self.m_topics_supp)
+			self.m_topics_supp_indices[self.tid] = [temp_len-4, temp_len-3, temp_len-2,temp_len-1] 
+			# 0: cid_lastposttime, 1: cid_posts, 2: tid_lastposttime, 3: tid_posts
 
 			self.tid += 1
 
@@ -162,9 +171,8 @@ class Mongo:
 			self.m_posts_supp.append({"_key":"uid:"+str(uid)+":posts","value":str(self.pid),"score":timestamp})
 			self.m_users[author]['postcount'] += 1
 
-			for i in range(0,len(self.m_users_supp)): # increment user post count
-				if self.m_users_supp[i]['value'] == str(uid) and self.m_users_supp[i]['_key'] == "users:postcount":
-					self.m_users_supp[i]['score'] += 1
+			# increment user post count
+			self.m_users_supp[self.m_users_supp_indices[uid][1]]['score'] += 1
 
 			# update topic info
 			if self.m_topics[tid]['mainPid'] == 0: # adding first post
@@ -176,21 +184,18 @@ class Mongo:
 			self.m_topics[tid]['lastposttime'] = timestamp
 			self.m_topics[tid]['postcount'] += 1
 
-			foundPoster = False
-			for i in range(0,len(self.m_topics_supp)): # incremenet topic post count and timestamps
-				if self.m_topics_supp[i]['value'] == str(new_tid) and self.m_topics_supp[i]['_key'] == "cid:"+str(cid)+":tids:lastposttime":
-					self.m_topics_supp[i]['score'] = timestamp
-				if self.m_topics_supp[i]['value'] == str(new_tid) and self.m_topics_supp[i]['_key'] == "cid:"+str(cid)+":tids:posts":
-					self.m_topics_supp[i]['score'] += 1
-				if self.m_topics_supp[i]['value'] == str(new_tid) and self.m_topics_supp[i]['_key'] == "topics:recent":
-					self.m_topics_supp[i]['score'] = timestamp
-				if self.m_topics_supp[i]['value'] == str(new_tid) and self.m_topics_supp[i]['_key'] == "topics:posts":
-					self.m_topics_supp[i]['score'] += 1
-				if self.m_topics_supp[i]['_key'] == "tid:"+str(new_tid)+":posters" and self.m_topics_supp[i]['value'] == str(uid):
-					self.m_topics_supp[i]['score'] += 1
-					foundPoster = True
-			if not foundPoster:
+			# increment topic post count and timestamps
+			self.m_topics_supp[self.m_topics_supp_indices[new_tid][0]]['score'] = timestamp
+			self.m_topics_supp[self.m_topics_supp_indices[new_tid][1]]['score'] += 1
+			self.m_topics_supp[self.m_topics_supp_indices[new_tid][2]]['score'] = timestamp
+			self.m_topics_supp[self.m_topics_supp_indices[new_tid][3]]['score'] += 1
+
+			# add record of poster in topic
+			if (new_tid,uid) in self.m_topics_supp_posters:
+				self.m_topics_supp[self.m_topics_supp_posters[(new_tid,uid)]]['score'] += 1
+			else:
 				self.m_topics_supp.append({"_key":"tid:"+str(new_tid)+":posters","value":str(uid),"score":1})
+				self.m_topics_supp_posters[(new_tid,uid)] = len(self.m_topics_supp) - 1
 
 			self.m_posts_supp.append({"_key":"posts:pid","value":str(self.pid),"score":timestamp})
 			self.m_posts_supp.append({"_key":"cid:"+str(cid)+":pids","value":str(self.pid),"score":timestamp})

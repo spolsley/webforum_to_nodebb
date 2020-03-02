@@ -15,6 +15,7 @@ searchposts = []
 searchtopics = []
 
 # build up search topics
+print "Processing " + str(len(mon[2])) + " topics..."
 for t in mon[2]:
     new_st = {
         'id':t['tid'],
@@ -24,14 +25,26 @@ for t in mon[2]:
     }
     searchtopics.append(new_st)
 
+print "Topics Ready"
+
 # build up search posts
+count = 0
+print "Processing " + str(len(mon[4])) + " posts..."
 for p in mon[4]:
     tid = p['tid']
     for t in mon[2]:
         if t['tid'] == tid:
             cid = t['cid']
             break
+    count += 1
     searchposts.append({'id':p['pid'],'cid':str(cid),'content':p['content'],'uid':str(p['uid'])})
+    if count % 1000:
+        print count
 
+print "Posts Ready"
+
+print "Inserting Topics"
 result = coll_topics.insert_many(searchtopics) # topics
+print "Inserting Posts"
 result = coll_posts.insert_many(searchposts) # posts
+print "Done"
